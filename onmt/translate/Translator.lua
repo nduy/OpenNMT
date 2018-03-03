@@ -423,6 +423,7 @@ function Translator:translateBatch(batch)
 
   -- if we have a language model - initialize lm state with BOS
   local lmStates, lmContext
+  
   if self.lm then
     local bos_inputs = torch.IntTensor(batch.size):fill(onmt.Constants.BOS)
     if #self.lm.dicts.src.features > 0 then
@@ -442,7 +443,7 @@ function Translator:translateBatch(batch)
   end
 
   local decInitStates = self.model.models.bridge:forward(encStates)
-
+ 
   -- Compute gold score.
   local goldScore
   if batch.targetInput ~= nil then
@@ -472,14 +473,72 @@ function Translator:translateBatch(batch)
 
   advancer:setKeptStateIndexes({attnIndex, featsIndex})
 
-  -- Conduct beam search.
-  local beamSearcher = onmt.translate.BeamSearcher.new(advancer, self.args.save_beam_to:len() > 0)
-  local results, histories = beamSearcher:search(self.args.beam_size,
-                                                 self.args.n_best,
-                                                 self.args.pre_filter_factor,
-                                                 false,
-                                                 self.placeholderMask)
-
+  -- Conduct beam search. +++++++++++++++++++++++++++++++++++++++++++++
+  -- ADDED CODE @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+  local results = {}
+  local histories = {}
+  local beamSearcher = {}
+  if (#batch:getSourceInput() == 1) then -- case with not feature
+    local endingIndeces = batch:getSourceInput():size(2)-1 -- -1 to discard the dot symbol
+    local lastSourceIndeces = batch:getSourceInput():select(2,endingIndeces)
+    -- print(self.dicts.tgt.words:lookup(lastSourceIndeces[1]))
+    -- print(self.dicts.src.words:lookup(lastSourceIndeces[1]))
+    -- local tmp = self.dicts.src.words:lookup(lastSourceIndeces[1])
+    -- print(self.dicts.tgt.words:lookup(tmp))
+    -- Now look up evey ending location of the src in the tg dictionary
+    for i = 1, lastSourceIndeces:size(1) do
+      tmp = self.dicts.src.words:lookup(lastSourceIndeces[i])
+      -- print(self.dicts.tgt.words:lookup(tmp))
+      tmp = self.dicts.tgt.words:lookup(tmp)
+      if tmp then
+        -- print(tmp)
+        lastSourceIndeces[i] = tmp 
+      else
+        lastSourceIndeces[i] = 3                               
+      end
+    end
+    -- print(lastSourceIndeces)
+    -- print(self.dicts.tgt.words:lookup(lastSourceIndeces[1]))
+    -- print(self.dicts.tgt.words:lookup(lastSourceIndeces[2]))
+    -- print(batch:getSourceInput():size(2))
+    local beamSearcher = onmt.translate.BeamSearcher.new(advancer, self.args.save_beam_to:len() > 0)
+    local results, histories = beamSearcher:search(self.args.beam_size,
+                                                   self.args.n_best,
+                                                   self.args.pre_filter_factor,
+                                                   false,
+                                                   self.placeholderMask,
+                                                   lastSourceIndeces)
+  else -- That is with features
+    local endingIndeces = batch:getSourceInput()[1]:size(2) -- -1 to convert size to in
+    -- print(endingIndeces)
+    -- print(batch:getSourceInput())
+    local lastSourceIndeces_word = batch:getSourceInput()[1]:select(2,endingIndeces)
+    -- local lastSourceIndeces_word = batch:getSourceInput()[1]:select(2,endingIndeces)   -- This is with the dot
+    -- local lastSourceIndeces_features = batch:getSourceInput()[2]:select(2,endingIndeces)
+    for i = 1, lastSourceIndeces_word:size(1) do
+      tmp = self.dicts.src.words:lookup(lastSourceIndeces_word[i])
+      -- print(self.dicts.tgt.words:lookup(tmp))
+      tmp = self.dicts.tgt.words:lookup(tmp)
+      if tmp then
+        -- print(tmp)
+        lastSourceIndeces_word[i] = tmp 
+      else
+        lastSourceIndeces_word[i] = 3                               
+      end
+    end
+    -- print(lastSourceIndeces)
+    -- print(self.dicts.tgt.words:lookup(lastSourceIndeces_word[1]))
+    -- print(self.dicts.tgt.words:lookup(lastSourceIndeces_word[2]))
+    -- print(batch:getSourceInput():size(2))
+    beamSearcher = onmt.translate.BeamSearcher.new(advancer, self.args.save_beam_to:len() > 0)
+    results, histories = beamSearcher:search(self.args.beam_size,
+                                             self.args.n_best,
+                                             self.args.pre_filter_factor,
+                                             false,
+                                             self.placeholderMask,
+                                             lastSourceIndeces_word)
+  end
+  
   local allHyp = {}
   local allFeats = {}
   local allAttn = {}

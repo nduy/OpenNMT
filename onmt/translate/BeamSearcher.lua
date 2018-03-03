@@ -37,6 +37,8 @@ Parameters:
   larger value to consider more. [1]
   * `keepInitial` - optional, whether return the initial token or not. [false]
   * `vocabMask` - limit the use of some vocabs
+  * `forceInitial`- Force initial character to be this, instead of <s>. If this is 
+  nil then start with <s> as normal
 
 Returns:
 
@@ -47,7 +49,7 @@ Returns:
     and `histories[b].scores` save the full beam search history of the b-th sample.
 
 ]]
-function BeamSearcher:search(beamSize, nBest, preFilterFactor, keepInitial, vocabMask)
+function BeamSearcher:search(beamSize, nBest, preFilterFactor, keepInitial, vocabMask, forceInitial)
 
   self.nBest = nBest or 1
   self.realBeamSize = beamSize or 1
@@ -62,29 +64,51 @@ function BeamSearcher:search(beamSize, nBest, preFilterFactor, keepInitial, voca
 
   -- Initialize the beam.
   beams[1] = self.advancer:initBeam()
-
+  -- print(type(beams[1]['_tokens'][1][1]))
+  -- print(type(beams[1]['_state'][1][1]))
+  -- Force the first token
+  -- beams[1]['_tokens'][1][1] = 10
+  -- beams[1]['_tokens'][1][2] = 11
+  -- beams[2]['_tokens'][1][1] = 30
+  if forceInitial then
+    beams[1]['_tokens'][1] = forceInitial
+  end
+  
   self.gridHeight = (beams[1]:getState()[11] and beams[1]:getState()[11]:size(2)+1) or 1
   self.beamSize = self.realBeamSize * self.gridHeight
-
+  -- print(beams)
   local remaining = beams[1]:getRemaining()
   if beams[1]:getTokens()[1]:size(1) ~= remaining * self.beamSize then
+    -- print(self.beamSize)
     beams[1]:_replicate(self.beamSize)
   end
-
+  -- print(beams)
+  
   local t = 1
   while remaining > 0 do
     -- Update beam states based on new tokens.
     self.advancer:update(beams[t])
-
+	-- print(beams)
+	-- print("00000222222",t)
+	-- print(beams[t]['_tokens'][1])
+	-- if t==1 then
+	--	beams[1]['_tokens'][1][1]=13
+	--	beams[1]['_tokens'][1][2]=13
+	--	beams[1]['_tokens'][1][3] =13
+	-- end
     -- Expand beams by all possible tokens and return the scores.
     local scores = self.advancer:expand(beams[t])
-
+	-- print(beams[t]['_tokens'][1])
+	-- os.exit()
     -- Find next best tokens and create a new beam (maintained by BeamSearcher).
     self:_makeNewBeam(beams, scores)
 
     -- Determine which hypotheses are complete.
     local completed = self.advancer:isComplete(beams[t + 1])
-
+	-- print("!!!!!!!!!")
+	-- print("z")
+	-- print("x",completed)
+	
     -- Remove completed hypotheses (maintained by BeamSearcher).
     local finishedBatches, finishedHypotheses, finishedHistory =
       self:_completeHypotheses(beams, completed)
@@ -93,10 +117,16 @@ function BeamSearcher:search(beamSize, nBest, preFilterFactor, keepInitial, voca
       finished[finishedBatches[b]] = finishedHypotheses[b]
       histories[finishedBatches[b]] = finishedHistory[b]
     end
+   -- if t==1 then
+   --   beams[2]['_tokens'][1][1] = 20
     t = t + 1
     remaining = beams[t]:getRemaining()
+    -- print("-------",t)    
+    -- print(beams)
   end
-
+  -- print("!!!!!!!!!!!!!!!!!!!!!!!!")
+  -- print(finished)
+  -- print('Exited')
   return finished, histories
 end
 
@@ -136,7 +166,14 @@ function BeamSearcher:_findKBest(beams, vocabSize, kBest, expandedScores, expand
 
   -- Prune hypotheses if necessary.
   local pruned = self.advancer:filter(beams[t], consideredToken, consideredScores, consideredBackPointer)
-
+	
+  -- print('|TOKEN|||||||!!!!!!!!!!!!!!!!!!!')
+  -- print(consideredToken)
+  -- print('|SCORE|||||||!!!!!!!!!!!!!!!!!!!')
+  -- print(consideredScores)
+  -- print('|consideredBackPointer|||||||!!!!!!!!!!!!!!!!!!!')
+  -- print(consideredBackPointer)
+  
   if pruned and pruned:any() then
     consideredScores:view(-1):maskedFill(pruned, -math.huge)
     consideredNormScores:view(-1):maskedFill(pruned, -math.huge)
